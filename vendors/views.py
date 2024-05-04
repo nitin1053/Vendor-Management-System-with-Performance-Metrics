@@ -6,22 +6,13 @@ from .models import Vendor, PurchaseOrder
 from .serializers import *
 from django.db.models import Avg
 
-# views.py
-
-from rest_framework import generics
-from rest_framework.response import Response
-from rest_framework_simplejwt.tokens import RefreshToken
-from django.contrib.auth.models import User
-
 from rest_framework import generics
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.models import User
 
 from rest_framework import generics, status
-from rest_framework.response import Response
 from django.contrib.auth import authenticate
-from rest_framework_simplejwt.tokens import RefreshToken
 from .serializers import UserSignupSerializer, UserLoginSerializer
 
 class UserSignup(generics.CreateAPIView):
@@ -46,8 +37,44 @@ class UserLogin(generics.GenericAPIView):
 
 
 
+class PurchaseOrderDetailAPIView(APIView):
+    def get_object(self, po_id):
+        try:
+            return PurchaseOrder.objects.get(po_number=po_id)
+        except PurchaseOrder.DoesNotExist:
+            return None
 
+    def get(self, request, po_id):
+        purchase_order = self.get_object(po_id)
+        if purchase_order is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        serializer = PurchaseOrderSerializer(purchase_order)
+        return Response(serializer.data)
 
+    def put(self, request, po_id):
+        purchase_order = self.get_object(po_id)
+        if purchase_order is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        serializer = PurchaseOrderSerializer(purchase_order, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            
+            # Recalculate and update vendor performance metrics
+            purchase_order.vendor.update_performance_metrics()
+
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, po_id):
+        purchase_order = self.get_object(po_id)
+        if purchase_order is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        purchase_order.delete()
+        
+        # Recalculate and update vendor performance metrics
+        purchase_order.vendor.update_performance_metrics()
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 class VendorListCreateAPIView(APIView):
     def get(self, request):
@@ -103,39 +130,12 @@ class PurchaseOrderListCreateAPIView(APIView):
         serializer = PurchaseOrderSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
+            
+            # Recalculate and update vendor performance metrics
+            serializer.instance.vendor.update_performance_metrics()
+
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-class PurchaseOrderDetailAPIView(APIView):
-    def get_object(self, po_id):
-        try:
-            return PurchaseOrder.objects.get(po_number=po_id)
-        except PurchaseOrder.DoesNotExist:
-            return None
-
-    def get(self, request, po_id):
-        purchase_order = self.get_object(po_id)
-        if purchase_order is None:
-            return Response(status=status.HTTP_404_NOT_FOUND)
-        serializer = PurchaseOrderSerializer(purchase_order)
-        return Response(serializer.data)
-
-    def put(self, request, po_id):
-        purchase_order = self.get_object(po_id)
-        if purchase_order is None:
-            return Response(status=status.HTTP_404_NOT_FOUND)
-        serializer = PurchaseOrderSerializer(purchase_order, data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    def delete(self, request, po_id):
-        purchase_order = self.get_object(po_id)
-        if purchase_order is None:
-            return Response(status=status.HTTP_404_NOT_FOUND)
-        purchase_order.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
 
 class VendorPerformanceAPIView(APIView):
     def get(self, request, vendor_id):
